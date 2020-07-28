@@ -1,0 +1,312 @@
+---
+title: Tuango - RFM Analysis for Mobile App Push Messaging on the post roll-out data
+output: html_document
+---
+
+* Name: Jiaoyang Wang
+* GitLab id: rsm-jiw030
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 96,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+## make all required libraries available by loading radiant package if needed
+if (!exists("r_environment")) library(radiant)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+## Setup
+
+Please complete this Rmarkdown document by answering question 14 in `tuango.pdf` on Canvas (week4/). The code block below loads the data you need for this second Rmarkdown file. Create an HTML file with all your results and answers and push both the Rmarkdown and HTML file to GitLab when you are done. All results MUST be reproducible (i.e., the TA and I must be able to recreate the Notebook/HTML from the Rmarkdown file without changes or errors).
+
+```{r}
+## loading the data - this dataset must NOT be changed
+tuangop <- readr::read_rds("data/tuango_post.rds")
+```
+
+## Question answers
+
+**_No targeting_**
+```{r}
+No_target <- tuangop %>%
+  filter(training == 0) %>%
+  summarise(
+    nr_mail = n(),
+    mail_cost = nr_mail * 2.5,
+    rep_rate = mean(buyer == "yes"),
+    nr_resp = nr_mail * rep_rate,
+    profit = 0.5 * sum(ordersize) - mail_cost,
+    ROME = profit / mail_cost
+  )
+```
+
+**_Independent RFM: post_iq_**
+```{r}
+## Create quintile variables for recency, frequency and monetary.
+tuangop <- tuangop %>%
+  mutate(
+    rec_iq = xtile(recency, 5),
+    freq_iq = xtile(frequency, 5, rev = TRUE),
+    mon_iq = xtile(monetary, 5, rev = TRUE)
+  )
+
+tuangop$rfm_iq <- paste0(tuangop$rec_iq, tuangop$freq_iq, tuangop$mon_iq)
+
+## Check with rfm_iq_pre
+mean(tuangop$rfm_iq == tuangop$rfm_iq_pre)
+```
+
+```{r}
+## Calculate the breakeven response rate across all training data
+avg_spend <- tuangop %>%
+  filter(training == 1, buyer == "yes") %>%
+  summarise(average = mean(ordersize))
+
+margin_on_sale <- 0.5 * avg_spend$average
+breakeven <- 2.5 / margin_on_sale
+```
+
+```{r}
+## create a list to find which bins to mail
+A <- tuangop %>%
+  filter(training == 1) %>%
+  group_by(rfm_iq) %>%
+  summarise(smsto_iq = mean(buyer == "yes") > breakeven) %>%
+  ungroup()
+```
+
+```{r}
+tuangop <- tuangop %>%
+  left_join(A, by = c("rfm_iq" = "rfm_iq"))
+```
+
+```{r}
+## create a function
+perf_calc_p <- function(sms, intro) {
+  tuangop %>%
+    filter(training == 0, tuangop[, sms] == TRUE) %>%
+    summarise(
+      nr_mail = n(),
+      mail_cost = nr_mail * 2.5,
+      rep_rate = mean(buyer == "yes"),
+      nr_resp = nr_mail * rep_rate,
+      # profit = mean(ordersize) * nr_resp - mail_cost,
+      profit = 0.5 * sum(ordersize) - mail_cost,
+      ROME = profit / mail_cost,
+      intro = intro
+    )
+}
+```
+
+
+```{r}
+post_iq <- perf_calc_p(sms = "smsto_iq", intro = "Based on Independent RFM")
+print(paste0(post_iq$intro, ", the response rate is ", post_iq$rep_rate, ", the mail cost is ", post_iq$mail_cost, ", the profit is ", post_iq$profit, ", and the ROME is ", post_iq$ROME))
+```
+
+**_Sequential RFM: post_sq_**
+```{r}
+## calculate sequential frequency quintiles
+tuangop <- tuangop %>%
+  group_by(rec_iq) %>%
+  mutate(freq_sq = xtile(frequency, 5, rev = TRUE)) %>%
+  ungroup()
+
+## calculate sequential monetary quintiles
+tuangop <- tuangop %>%
+  group_by(rec_iq, freq_sq) %>%
+  mutate(mon_sq = xtile(monetary, 5, rev = TRUE)) %>%
+  ungroup()
+
+## create rfm_sq
+tuangop <- mutate(tuangop, rfm_sq = paste0(rec_iq, freq_sq, mon_sq))
+```
+
+```{r}
+## create a list to find which bins to mail
+A <- tuangop %>%
+  filter(training == 1) %>%
+  group_by(rfm_sq) %>%
+  summarise(smsto_sq = mean(buyer == "yes") > breakeven) %>%
+  ungroup()
+```
+
+```{r}
+tuangop <- tuangop %>%
+  left_join(A, by = c("rfm_sq" = "rfm_sq"))
+```
+
+```{r}
+post_sq <- perf_calc_p(sms = "smsto_sq", intro = "Based on Sequential RFM")
+print(paste0(post_sq$intro, ", the response rate is ", post_sq$rep_rate, ", the mail cost is ", post_sq$mail_cost, ", the profit is ", post_sq$profit, ", and the ROME is ", post_sq$ROME))
+```
+
+**_Sequential RFM with breakeven rate for each bin_**
+```{r}
+## Create BE rate for every bins in training set
+Breakeven <- tuangop %>%
+  filter(training == 1, buyer == "yes") %>%
+  group_by(rfm_sq) %>%
+  summarise(
+    average = mean(ordersize),
+    margin_each = 0.5 * average,
+    breakeven_each = 2.5 / margin_each
+  ) %>%
+  ungroup()
+```
+
+```{r}
+## Add those bins not exists in training set
+##
+Breakeven <- tuangop %>%
+  distinct(rfm_sq) %>%
+  left_join(Breakeven, by=c("rfm_sq"="rfm_sq"))
+```
+
+
+```{r}
+## Add the BE rate to the dataset
+tuangop <- tuangop %>%
+  left_join(Breakeven, by = "rfm_sq")
+
+tuangop$breakeven_each <- tuangop$breakeven_each %>% replace_na(1)
+```
+
+```{r}
+## create a table with two columns: bins and whether mail to or not
+A <- tuangop %>%
+  filter(training == 1) %>%
+  group_by(rfm_sq) %>%
+  summarise(smsto_sq_each = mean(buyer == "yes") > mean(breakeven_each)) %>%
+  ungroup()
+```
+
+
+```{r} 
+tuangop <- tuangop %>%
+  left_join(A, by = c("rfm_sq" = "rfm_sq"))
+```
+
+```{r}
+post_sq_each <- perf_calc_p(sms = "smsto_sq_each", intro = "Based on Sequencial RFM for Each Bin")
+print(paste0(post_sq_each$intro, ", the response rate is ", post_sq_each$rep_rate, ", the mail cost is ", post_sq_each$mail_cost, ", the profit is ", post_sq_each$profit, ", and the ROME is ", post_sq_each$ROME))
+```
+
+**_Independent RFM: post_iq_se_**
+```{r}
+## create a list to find which bins to mail
+A <- tuangop %>%
+  filter(training == 1) %>%
+  group_by(rfm_iq) %>%
+  summarise(smsto_iq_se = (mean(buyer == "yes") - 1.64 * seprop(buyer == "yes")) > breakeven) %>%
+  ungroup()
+```
+
+```{r}
+tuangop <- tuangop %>%
+  left_join(A, by = c("rfm_iq" = "rfm_iq"))
+```
+
+```{r}
+post_iq_se <- perf_calc_p(sms = "smsto_iq_se", intro = "Based on Independent RFM under 95% Confidence Interval")
+print(paste0(post_iq_se$intro, ", the response rate is ", post_iq_se$rep_rate, ", the mail cost is ", post_iq_se$mail_cost, ", the profit is ", post_iq_se$profit, ", and the ROME is ", post_iq_se$ROME))
+```
+
+**_Sequential RFM: post_sq_se_**
+```{r}
+## create a list to find which bins to mail
+A <- tuangop %>%
+  filter(training == 1) %>%
+  group_by(rfm_sq) %>%
+  summarise(smsto_sq_se = (mean(buyer == "yes") - 1.64 * seprop(buyer == "yes")) > breakeven) %>%
+  ungroup()
+```
+
+```{r}
+tuangop <- tuangop %>%
+  left_join(A, by = c("rfm_sq" = "rfm_sq"))
+```
+
+```{r}
+post_sq_se <- perf_calc_p(sms = "smsto_sq_se", intro = "Based on Sequential RFM under 95% Confidence Interval")
+print(paste0(post_sq_se$intro, ", the response rate is ", post_sq_se$rep_rate, ", the mail cost is ", post_sq_se$mail_cost, ", the profit is ", post_sq_se$profit, ", and the ROME is ", post_sq_se$ROME))
+```
+
+```{r}
+profit_nt <- No_target$profit
+profit_iq <- post_iq$profit
+profit_sq <- post_sq$profit
+profit_sq_each <- post_sq_each$profit
+profit_iq_se <- post_iq_se$profit
+profit_sq_se <- post_sq_se$profit
+
+ROME_nt <- No_target$ROME
+ROME_iq <- post_iq$ROME
+ROME_sq <- post_sq$ROME
+ROME_sq_each <- post_sq_each$ROME
+ROME_iq_se <- post_iq_se$ROME
+ROME_sq_se <- post_sq_se$ROME
+```
+
+```{r}
+results <- tibble::tibble(
+  name = c("No Target", "Indep. RFM", "Seq. RFM", "Seq. RFM with each BE", "Indep. lb RFM", "Seq. lb RFM"),
+  Profit = c(profit_nt, profit_iq, profit_sq, profit_sq_each, profit_iq_se, profit_sq_se),
+  ROME = c(ROME_nt, ROME_iq, ROME_sq, ROME_sq_each, ROME_iq_se, ROME_sq_se)
+) %>%
+  mutate(name = factor(name, levels = name))
+```
+
+```{r}
+## Create a bar chart with profit information
+results %>%
+  ggplot(aes(x = name, y = Profit, fill = name)) + geom_bar(stat = "identity") + geom_text(aes(label = round(Profit, 2)), size = 3) + labs(title = 'Profit in different models') + theme(axis.text.x  = element_text(size=8,angle=45))
+```
+
+
+```{r}
+## Create a bar chart with ROME information
+results %>%
+  ggplot(aes(x = name, y = ROME, fill = name)) + geom_bar(stat = "identity") + geom_text(aes(label = round(ROME, 2)), size = 3) + labs(title = 'ROME in different models') + theme(axis.text.x  = element_text(size=8,angle=45))
+```
+
+> Based on the above analysis on the remaining data, create a RFM analysis with breakeven rate calculated for each bins will lead to the largest profit. As for ROME, when considering the 95% confidence interval, use independent RFM leads to the largest ROME.

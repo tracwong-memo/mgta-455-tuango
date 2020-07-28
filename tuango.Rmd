@@ -1,0 +1,364 @@
+---
+title: Tuango - RFM Analysis for Mobile App Push Messaging
+output: html_document
+---
+
+* Name: Jiaoyang Wang 
+* GitLab id: rsm-jiw030
+
+```{r r_setup, include = FALSE}
+## initial settings
+knitr::opts_chunk$set(
+  comment = NA,
+  echo = TRUE,
+  error = TRUE,
+  cache = FALSE,
+  message = FALSE,
+  dpi = 96,
+  warning = FALSE
+)
+
+## width to use when printing tables etc.
+options(
+  width = 250,
+  scipen = 100,
+  max.print = 5000,
+  stringsAsFactors = FALSE
+)
+
+## make all required libraries available by loading radiant package if needed
+if (!exists("r_environment")) library(radiant)
+```
+
+<style>
+.btn, .form-control, pre, code, pre code {
+  border-radius: 4px;
+}
+.table {
+  width: auto;
+}
+ul, ol {
+  padding-left: 18px;
+}
+code, pre, pre code {
+  overflow: auto;
+  white-space: pre;
+  word-wrap: normal;
+}
+code {
+  color: #c7254e;
+  background-color: #f9f2f4;
+}
+pre {
+  background-color: #ffffff;
+}
+</style>
+
+## Setup
+
+Please complete this Rmarkdown document by answering questions 1-13 in `tuango.pdf` on Canvas (week4/). The code block below loads the data you need for this first Rmarkdown file. Create an HTML file with all your results and answers and push both the Rmarkdown and HTML file to GitLab when you are done. All results MUST be reproducible (i.e., the TA and I must be able to recreate the results without changes or errors)
+
+Use "tuango_post.Rmd" to answer Question 14 in `tuango.pdf`
+
+```{r}
+## loading the data - this dataset must NOT be changed
+tuango <- readr::read_rds("data/tuango.rds")
+```
+
+## Question answers
+
+### 1. What percentage of customers responded (i.e., bought anything) after the push message?
+
+```{r}
+mean(tuango$buyer == "yes")
+```
+
+> 2.98% of customers responded after the push message.
+
+### 2. What was the average amount spent on the Karaoke deal by customers that bought one (or more)? Use the ordersize variable for your calculation.
+```{r}
+avg_spend <- tuango %>%
+  filter(buyer == "yes") %>%
+  summarise(average = mean(ordersize))
+
+print(paste0("Customers who bought one or more on the Karaoke deal spend ", avg_spend$average))
+```
+
+
+### 3. Create quintile variables for recency, frequency and monetary.
+
+```{r}
+tuango <- tuango %>%
+  mutate(
+    rec_iq = xtile(recency, 5),
+    freq_iq = xtile(frequency, 5, rev = TRUE),
+    mon_iq = xtile(monetary, 5, rev = TRUE)
+  )
+```
+
+### 4. Create bar charts showing the response rate (i.e., the proportion of customers who bought something) for this deal per recency, frequency, and monetary quintile (i.e., 3 plots).
+
+**For recency**
+```{r}
+tuango %>%
+  group_by(rec_iq) %>%
+  summarise(prop = mean(buyer == "yes")) %>%
+  ggplot(aes(x = rec_iq, y = prop, fill = rec_iq)) + geom_bar(stat = "identity") + labs(x = "Recency", y = "Response rate")
+```
+
+**For frequency**
+```{r}
+tuango %>%
+  group_by(freq_iq) %>%
+  summarise(prop = mean(buyer == "yes")) %>%
+  ggplot(aes(x = freq_iq, y = prop, fill = freq_iq)) + geom_bar(stat = "identity") + labs(x = "Frequency", y = "Response rate")
+```
+
+**For monetary**
+```{r}
+tuango %>%
+  group_by(mon_iq) %>%
+  summarise(prop = mean(buyer == "yes")) %>%
+  ggplot(aes(x = mon_iq, y = prop, fill = mon_iq)) + geom_bar(stat = "identity") + labs(x = "Monetary", y = "Response rate")
+```
+
+### 5. Create bar charts showing the average amount spent (in RMB) (i.e., ordersize) per recency, frequency, and monetary quintile using only those customers who placed an order after the push message. Hint: constrain the data used for the plot with a “filter”.
+
+**For recency**
+```{r}
+tuango %>%
+  filter(buyer == "yes") %>%
+  group_by(rec_iq) %>%
+  summarise(avg = mean(ordersize)) %>%
+  ggplot(aes(x = rec_iq, y = avg, fill = rec_iq)) + geom_bar(stat = "identity") + labs(x = "Recency", y = "Average Amount Spent")
+```
+
+
+**For frequency**
+```{r}
+tuango %>%
+  filter(buyer == "yes") %>%
+  group_by(freq_iq) %>%
+  summarise(avg = mean(ordersize)) %>%
+  ggplot(aes(x = freq_iq, y = avg, fill = freq_iq)) + geom_bar(stat = "identity") + labs(x = "Frequency", y = "Average Amount Spent")
+```
+
+**For monetary**
+```{r}
+tuango %>%
+  filter(buyer == "yes") %>%
+  group_by(mon_iq) %>%
+  summarise(avg = mean(ordersize)) %>%
+  ggplot(aes(x = mon_iq, y = avg, fill = mon_iq)) + geom_bar(stat = "identity") + labs(x = "Monetary", y = "Average Amount Spent")
+```
+
+### 6. What do the above bar charts reveal about the likelihood of response and the size of the order across the different recency, frequency, and monetary quintiles?
+
+> The response rate differs a lot for people in different recency group. Those who purchased recently are more likely to be attracted by the pushed message. The response rates for different frequency group are also significant different. The response rate in group 1 is much different than other groups. For monetary groups, the response rate are also different. The rates for group 1 and group 2 are significant different from them in group 3,4,5. 
+
+> The average amount spent by people in different recency grousp are not that different. The difference among each group is small. The situation is similar across the differnet frequency groups and monetary groups.
+
+### 7. What is the breakeven response rate?
+```{r}
+margin_on_sale <- 0.5 * avg_spend$average
+breakeven <- 2.5 / margin_on_sale
+
+print(paste0("The breakeven response rate is ", breakeven))
+```
+
+### 8. What is the projected profit in RMB and the return on marketing expenditures if you offer the deal to all 250,902 remaining customers?
+
+```{r}
+perc_mail <- 1
+nr_mail <- 250902 * perc_mail
+rep_rate <- mean(tuango$buyer == "yes")
+nr_resp <- nr_mail * rep_rate
+mail_cost <- 2.5 * nr_mail
+profit_nt <- margin_on_sale * nr_resp - mail_cost
+ROME_nt <- profit_nt / mail_cost
+print(paste0("If offer the deal to all 250,902 remaining customers, the projected profit is ", profit_nt, "RMB and the ROME is ", ROME_nt))
+```
+
+### 9. Evaluate the performance implications of offering the deal to only those customers (out of 250,902) in RFM cells with a response rate greater than the breakeven response rate. Generate your result based on both sequential and independent RFM. Determine the projected profit in RMB and the return on marketing expenditures for each approach.
+
+**_Independent RFM: res_iq_**
+```{r}
+tuango$rfm_iq <- paste0(tuango$rec_iq, tuango$freq_iq, tuango$mon_iq)
+```
+
+```{r}
+## mail TRUE or FALSE
+tuango <- tuango %>%
+  group_by(rfm_iq) %>%
+  mutate(smsto_iq = mean(buyer == "yes") > breakeven) %>%
+  ungroup()
+```
+
+
+```{r}
+## define a function
+perf_calc <- function(sms, intro) {
+  perc_mail <- mean(pull(tuango[, sms]))
+  nr_mail <- 250902 * perc_mail
+  dat <- filter(tuango, tuango[, sms] == TRUE)
+  rep_rate <- mean(dat$buyer == "yes")
+  nr_resp <- nr_mail * rep_rate
+  mail_cost <- 2.5 * nr_mail
+  profit <- margin_on_sale * nr_resp - mail_cost
+  ROME <- profit / mail_cost
+  res <- data.frame(intro, rep_rate, mail_cost, profit, ROME)
+}
+```
+
+
+```{r}
+res_iq <- perf_calc(sms = "smsto_iq", intro = "Based on Independent RFM")
+print(paste0(res_iq$intro, ", the response rate is ", res_iq$rep_rate, ", the mail cost is ", res_iq$mail_cost, ", the profit is ", res_iq$profit, ", and the ROME is ", res_iq$ROME))
+```
+
+**_Sequential RFM: res_sq_**
+```{r}
+## calculate sequential frequency quintiles
+tuango <- tuango %>%
+  group_by(rec_iq) %>%
+  mutate(freq_sq = xtile(frequency, 5, rev = TRUE)) %>%
+  ungroup()
+
+## calculate sequential monetary quintiles
+tuango <- tuango %>%
+  group_by(rec_iq, freq_sq) %>%
+  mutate(mon_sq = xtile(monetary, 5, rev = TRUE)) %>%
+  ungroup()
+
+## create rfm_sq
+tuango <- mutate(tuango, rfm_sq = paste0(rec_iq, freq_sq, mon_sq))
+```
+
+```{r}
+## mail TRUE or FALSE
+tuango <- tuango %>%
+  group_by(rfm_sq) %>%
+  mutate(smsto_sq = mean(buyer == "yes") > breakeven) %>%
+  ungroup()
+```
+
+```{r}
+res_sq <- perf_calc(sms = "smsto_sq", intro = "Based on Sequential RFM")
+print(paste0(res_sq$intro, ", the response rate is ", res_sq$rep_rate, ", the mail cost is ", res_sq$mail_cost, ", the profit is ", res_sq$profit, ", and the ROME is ", res_sq$ROME))
+```
+
+
+### 10.What do you notice when you compare the rfm_iq and rfm_sq variables? That is – do the two approaches generally yield the same RFM index for any given customer? What do you see as the pros and cons of the two approaches (from a statistical as well as logical perspective) and why?
+
+
+```{r}
+## check whether rfm_iq is the same as rfm_iq_pre
+any(tuango$rfm_iq_pre == tuango$rfm_iq)
+```
+
+> We can notice that the two approaches sometimes yield different RFM index for the given customer. 
+
+> Sequential RFM model creates nested binning, a simple rank is assigned to recency values. Within each recency rank, customers are then assigned a frequency rank, and within each frequency rank, customers are assigned a monetary rank. The advantage is that this model provides a more even distribution of combined RFM scores. But the disadvantage is that it's difficult to interpret across different groups. For example, a frequency rank of 1 for a customer with a recency rank of 1 may not be comparable with a frequency rank of 1 for a customer with a recency rank of 5, since the frequency rank is dependent on the recency rank.
+
+> Independent RFM model creates independent ranks for recency, frequency, and monetary seperately. The advantage is that the interpretation of each of the three RFM components is clear;for example, a frequency score of 5 for one customer means the same as a frequency score of 5 for another customer, regardless of their recency scores. However, the disadvantage is that this model results in a less even distribution of combined RFM scores.
+
+### 11. The answer to question 9 assumes a single breakeven response rate that applies across all cells. Redo your analysis for sequential RFM based on a breakeven response rate calculated for each RFM cell.
+
+```{r}
+Breakeven <- tuango %>%
+  filter(buyer == "yes") %>%
+  group_by(rfm_sq) %>%
+  summarise(
+    average = mean(ordersize),
+    margin_each = 0.5 * average,
+    breakeven_each = 2.5 / margin_each
+  ) %>%
+  ungroup()
+```
+
+
+```{r}
+## mail TRUE or FALSE
+tuango <- tuango %>%
+  left_join(Breakeven, by = "rfm_sq")
+
+tuango$breakeven_each <- tuango$breakeven_each %>% replace_na(1)
+
+tuango <- tuango %>%
+  group_by(rfm_sq) %>%
+  mutate(smsto_sq_each = mean(buyer == "yes") > breakeven_each) %>%
+  ungroup()
+```
+
+```{r}
+res_sq_each <- perf_calc(sms = "smsto_sq_each", intro = "Based on Sequencial RFM for Each Bin")
+print(paste0(res_sq_each$intro, ", the response rate is ", res_sq_each$rep_rate, ", the mail cost is ", res_sq_each$mail_cost, ", the profit is ", res_sq_each$profit, ", and the ROME is ", res_sq_each$ROME))
+```
+
+
+### 12. The answer to question 9 does not account for the fact that the response rate for each cell is an estimated quantity (i.e., it has a standard error). Redo your analysis for both independent and sequential RFM, adjusting for the standard error of the response rate in each cell. What implications can you draw from the difference in predicted performance compared to question 9?
+
+**_Independent RFM_**
+```{r}
+## mail TRUE or FALSE
+tuango <- tuango %>%
+  group_by(rfm_iq) %>%
+  mutate(smsto_iq_se = (mean(buyer == "yes") - 1.64 * seprop(buyer == "yes")) > breakeven) %>%
+  ungroup()
+```
+
+```{r}
+res_iq_se <- perf_calc(sms = "smsto_iq_se", intro = "Based on Independent RFM under 95% Confidence Interval")
+print(paste0(res_iq_se$intro, ", the response rate is ", res_iq_se$rep_rate, ", the mail cost is ", res_iq_se$mail_cost, ", the profit is ", res_iq_se$profit, ", and the ROME is ", res_iq_se$ROME))
+```
+
+**_Sequential RFM_**
+```{r}
+## mail TRUE or FALSE
+tuango <- tuango %>%
+  group_by(rfm_sq) %>%
+  mutate(smsto_sq_se = (mean(buyer == "yes") - 1.64 * seprop(buyer == "yes")) > breakeven) %>%
+  ungroup()
+```
+
+```{r}
+res_sq_se <- perf_calc(sms = "smsto_sq_se", intro = "Based on Sequential RFM under 95% Confidence Interval")
+print(paste0(res_sq_se$intro, ", the response rate is ", res_sq_se$rep_rate, ", the mail cost is ", res_sq_se$mail_cost, ", the profit is ", res_sq_se$profit, ", and the ROME is ", res_sq_se$ROME))
+```
+
+### 13. Create a bar chart with profit information and a bar chart with ROME numbers for the analyses conducted in questions 9, 11, and 12
+```{r}
+profit_iq <- res_iq$profit
+profit_sq <- res_sq$profit
+profit_sq_each <- res_sq_each$profit
+profit_iq_se <- res_iq_se$profit
+profit_sq_se <- res_sq_se$profit
+
+ROME_iq <- res_iq$ROME
+ROME_sq <- res_sq$ROME
+ROME_sq_each <- res_sq_each$ROME
+ROME_iq_se <- res_iq_se$ROME
+ROME_sq_se <- res_sq_se$ROME
+```
+
+```{r}
+results <- tibble::tibble(
+  name = c("Indep. RFM", "Seq. RFM", "Seq. RFM with each BE", "Indep. lb RFM", "Seq. lb RFM"),
+  Profit = c(profit_iq, profit_sq, profit_sq_each, profit_iq_se, profit_sq_se),
+  ROME = c(ROME_iq, ROME_sq, ROME_sq_each, ROME_iq_se, ROME_sq_se)
+) %>%
+  mutate(name = factor(name, levels = name))
+```
+
+```{r}
+## Create a bar chart with profit information
+results %>%
+  ggplot(aes(x = name, y = Profit, fill = name)) + geom_bar(stat = "identity") + geom_text(aes(label = round(Profit, 2)), size = 3) + labs(title = 'Profit in different models') + theme(axis.text.x  = element_text(size=8,angle=45))
+```
+
+```{r}
+## Create a bar chart with ROME information
+results %>%
+  ggplot(aes(x = name, y = ROME, fill = name)) + geom_bar(stat = "identity") + geom_text(aes(label = round(ROME, 2)), size = 3) + labs(title = 'ROME in different models') + theme(axis.text.x  = element_text(size=8,angle=45))
+```
+
